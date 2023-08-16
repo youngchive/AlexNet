@@ -83,6 +83,7 @@ print(train_images.shape, train_labels.shape, test_images.shape, test_labels.sha
 # print(train_path_labels)
 
 
+
 # PIL을 활용한 방법
 i = 0
 j = 0
@@ -183,3 +184,114 @@ def get_train_valid_test_set(train_images, train_labels, test_images, test_label
 
 print(train_labels.shape)
 print(tr_images.shape, tr_oh_labels.shape, val_images.shape, val_oh_labels.shape, test_images.shape, test_oh_labels.shape)
+
+
+# 입력 인자 images_array labels는 모두 numpy array로 들어옴.
+# 인자로 입력되는 images_array는 전체 32x32 image array임.
+
+
+class Alphabet_Dataset(Sequence):
+    def __init__(self, images_array, labels, batch_size=BATCH_SIZE, augmentor=None, shuffle=False, pre_func=None):
+        '''
+        파라미터 설명
+        images_array: 원본 64*64 만큼의 image 배열값.
+        labels: 해당 image의 label들
+        batch_size: __getitem__(self, index) 호출 시 마다 가져올 데이터 batch 건수
+        augmentor: albumentations 객체
+        shuffle: 학습 데이터의 경우 epoch 종료시마다 데이터를 섞을지 여부
+        '''
+        # 객체 생성 인자로 들어온 값을 객체 내부 변수로 할당.
+        # 인자로 입력되는 images_array는 전체 32x32 image array임.
+        self.images_array = images_array
+        self.labels = labels
+        self.batch_size = batch_size
+        self.augmentor = augmentor
+        self.pre_func = pre_func
+        # train data의 경우
+        self.shuffle = shuffle
+        if self.shuffle:
+            # 객체 생성시에 한번 데이터를 섞음.
+            # self.on_epoch_end()
+            pass
+
+    # Sequence를 상속받은 Dataset은 batch_size 단위로 입력된 데이터를 처리함.
+    # __len__()은 전체 데이터 건수가 주어졌을 때 batch_size단위로 몇번 데이터를 반환하는지 나타남
+    def __len__(self):
+        # batch_size단위로 데이터를 몇번 가져와야하는지 계산하기 위해 전체 데이터 건수를 batch_size로 나누되, 정수로 정확히 나눠지지 않을 경우 1회를 더한다.
+        return int(np.ceil(len(self.labels) / self.batch_size))
+
+    # batch_size 단위로 image_array, label_array 데이터를 가져와서 변환한 뒤 다시 반환함
+    # 인자로 몇번째 batch 인지를 나타내는 index를 입력하면 해당 순서에 해당하는 batch_size 만큼의 데이타를 가공하여 반환
+    # batch_size 갯수만큼 변환된 image_array와 label_array 반환.
+    def __getitem__(self, index):
+        # index는 몇번째 batch인지를 나타냄.
+        # batch_size만큼 순차적으로 데이터를 가져오려면 array에서 index*self.batch_size:(index+1)*self.batch_size 만큼의 연속 데이터를 가져오면 됨
+        # 32x32 image array를 self.batch_size만큼 가져옴.
+        images_fetch = self.images_array[index * self.batch_size:(index + 1) * self.batch_size]
+        if self.labels is not None:
+            label_batch = self.labels[index * self.batch_size:(index + 1) * self.batch_size]
+
+        # 만일 객체 생성 인자로 albumentation으로 만든 augmentor가 주어진다면 아래와 같이 augmentor를 이용하여 image 변환
+        # albumentations은 개별 image만 변환할 수 있으므로 batch_size만큼 할당된 image_name_batch를 한 건씩 iteration하면서 변환 수행.
+        # 변환된 image 배열값을 담을 image_batch 선언. image_batch 배열은 float32 로 설정.
+        image_batch = np.zeros((images_fetch.shape[0], IMAGE_SIZE, IMAGE_SIZE, COLOR), dtype='float32')
+
+        # batch_size에 담긴 건수만큼 iteration 하면서 opencv image load -> image augmentation 변환(augmentor가 not None일 경우)-> image_batch에 담음.
+        for image_index in range(images_fetch.shape[0]):
+            # image = cv2.cvtColor(cv2.imread(image_name_batch[image_index]), cv2.COLOR_BGR2RGB)
+            # 원본 image를 IMAGE_SIZE x IMAGE_SIZE 크기로 변환
+            image = cv2.resize(images_fetch[image_index], (IMAGE_SIZE, IMAGE_SIZE))
+            # 만약 augmentor가 주어졌다면 이를 적용.
+            if self.augmentor is not None:
+                image = self.augmentor(image=image)['image']
+
+            # 만약 scaling 함수가 입력되었다면 이를 적용하여 scaling 수행.
+            if self.pre_func is not None:
+                image = self.pre_func(image)
+
+            # image_batch에 순차적으로 변환된 image를 담음.
+            image_batch[image_index] = image
+
+        return image_batch, label_batch
+
+    # epoch가 한번 수행이 완료 될 때마다 모델의 fit()에서 호출됨.
+    def on_epoch_end(self):
+        if (self.shuffle):
+            # print('epoch end')
+            # 원본 image배열과 label를 쌍을 맞춰서 섞어준다. scikt learn의 utils.shuffle에서 해당 기능 제공
+            self.images_array, self.labels = sklearn.utils.shuffle(self.images_array, self.labels)
+        else:
+            pass
+
+
+def zero_one_scalar(image):
+    return image/255.0
+
+tr_ds = Alphabet_Dataset(tr_images, tr_oh_labels, batch_size=BATCH_SIZE, augmentor=None, shuffle=True, pre_func=zero_one_scalar)
+val_ds = Alphabet_Dataset(val_images, val_oh_labels, batch_size=BATCH_SIZE, augmentor=None, shuffle=False, pre_func=zero_one_scalar)
+
+model = create_alexnet(in_shape=(IMAGE_SIZE, IMAGE_SIZE, COLOR), n_classes=CLASSES,
+                       kernel_regular=regularizers.l2(l2=REGULARIZER), optimizer=Adam(learning_rate=LEARNING_RATE))
+
+# 5번 iteration내에 validation loss가 향상되지 않으면 learning rate을 기존 learning rate * 0.2로 줄임.
+rlr_cb = ReduceLROnPlateau(monitor='val_loss', factor=0.2, patience=5, mode='min', verbose=1)
+ely_cb = EarlyStopping(monitor='val_loss', patience=10, mode='min', verbose=1)
+
+steps_per_epoch = tr_images.shape[0] // BATCH_SIZE
+validation_steps = val_images.shape[0] // BATCH_SIZE
+if tr_images.shape[0] % BATCH_SIZE != 0:
+    steps_per_epoch += 1
+if val_images.shape[0] % BATCH_SIZE != 0:
+    validation_steps += 1
+
+with tf.device("/device:GPU:0"):
+    history = model.fit(tr_ds, epochs=EPOCH,
+                        #steps_per_epoch=steps_per_epoch,
+                        validation_data=val_ds,
+                        #validation_steps=validation_steps,
+                        callbacks=[rlr_cb, ely_cb]
+                        )
+
+
+test_ds = Alphabet_Dataset(test_images, test_oh_labels, batch_size=BATCH_SIZE, augmentor=None, shuffle=False, pre_func=zero_one_scaler)
+model.evaluate(test_ds)
