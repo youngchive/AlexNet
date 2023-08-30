@@ -15,6 +15,56 @@ from PIL import Image
 from keras.utils import Sequence
 from keras.utils import to_categorical
 
+
+# 디렉토리명과 파일명을 통해서 레이블
+DATASET_DIR = 'Alphabet_Dataset'
+#DATASET_DIR = 'Rice_Dataset'
+DATASET_DIR_LEN = len(DATASET_DIR)
+DATASET_TYPE = '.jpg'
+
+IMAGE_SIZE = 227
+CLASSES = 3
+COLOR = 3  # 컬러는 3, 흑백은 1
+BATCH_SIZE = 32  # 배치사이즈
+REGULARIZER = 1e-5
+LEARNING_RATE = 1e-5
+EPOCH = 10
+
+TEST_SIZE = 0.2
+VALID_SIZE = 0.2
+
+
+def make_alphatype_dataframe(dataset_dir=DATASET_DIR):
+    paths = []
+    label_gubuns = []
+    # walk(): 하위의 폴더들을 for문으로 탐색할 수 있게 해준다.
+    for dirname, _, filenames in os.walk(dataset_dir):
+        for filename in filenames:
+            # 이미지 파일이 아닌 파일도 해당 디렉토리에 있음.
+            if DATASET_TYPE in filename:
+                # 파일의 절대 경로를 file_path 변수에 할당.
+                filename = dirname+'/'+ filename
+                paths.append(filename)
+                # 이미지 파일의 절대 경로에서 레이블명 생성을 위한 1차 추출. '/'로 분할하여 파일 바로 위 서브디렉토리 이름 가져옴.
+                start_pos = filename.find('/', DATASET_DIR_LEN-1) # '/' 있는 인덱스
+                end_pos = filename.rfind('/')
+                alphatype = filename[start_pos+1:end_pos] # 디렉토리 이름
+                label_gubuns.append(alphatype)
+
+    data_df = pd.DataFrame({'path':paths, 'label':label_gubuns})
+    return data_df
+
+
+pd.set_option('display.max_colwidth',200) # column의 width 설정
+data_df = make_alphatype_dataframe()
+print('data_df shape:', data_df.shape)
+data_df.head() # DataFrame 앞 5개 출력
+data_df['label'].value_counts() # 개별 분포도 확인
+
+
+
+
+
 # input shape, classes 개수, kernel_regularizer등을 인자로 가져감.
 def create_alexnet(in_shape=(IMAGE_SIZE, IMAGE_SIZE, COLOR), n_classes=CLASSES, kernel_regular=regularizers.l2(l2=0.0005), optimizer='adam'):
     input_tensor = Input(shape=in_shape)
